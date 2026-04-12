@@ -14,6 +14,6 @@
     "sourceMap": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

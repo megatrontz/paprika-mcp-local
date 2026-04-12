@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 /**
  * Paprika MCP Server
@@ -68,8 +68,7 @@ function resolveDbPath(): string {
 const dbPath = resolveDbPath();
 const repo = new PaprikaRepository(dbPath);
 
-// Repository init is async (WASM loading) — we await it in main() before connecting.
-// Tool registrations below reference `repo` but won't be called until after init.
+// bun:sqlite opens synchronously — no async init needed.
 
 const server = new McpServer({
   name: "paprika-mcp",
@@ -277,8 +276,6 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 
 async function main() {
-  await repo.init();
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

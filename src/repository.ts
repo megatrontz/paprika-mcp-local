@@ -4,18 +4,17 @@
  * Design decisions:
  * - Repository pattern: isolates all SQL and schema knowledge here.
  *   MCP tool handlers never touch the database directly.
- * - Read-only: we read the database file into memory via sql.js (SQLite compiled to WASM).
+ * - Read-only: we open the database file directly via bun:sqlite in read-only mode.
  *   Paprika owns the writes — we re-read on each server startup to get fresh data.
  * - Core Data epoch: Paprika stores timestamps as seconds since 2001-01-01T00:00:00Z
  *   (NSDate reference date), not Unix epoch. We convert to ISO 8601 on the way out.
  *
- * Why sql.js instead of better-sqlite3:
- *   sql.js is pure JavaScript (SQLite compiled to WebAssembly) — no native compilation
- *   step, no node-gyp, works on any platform without build tools.
+ * Why bun:sqlite:
+ *   Native SQLite binding bundled with Bun. Zero extra dependencies, synchronous API,
+ *   WAL mode support, and significantly faster than sql.js (WASM).
  */
 
-import initSqlJs, { type Database, type SqlValue } from "sql.js";
-import { readFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
 import type { Recipe, RecipeSummary, Category } from "./types.js";
 
 /** Core Data epoch offset: seconds between 1970-01-01 and 2001-01-01 */
@@ -27,55 +26,15 @@ function coreDataTimestampToISO(timestamp: number | null): string | null {
   return new Date(unixMs).toISOString();
 }
 
-/**
- * Helper to run a sql.js query and get typed row objects.
- * sql.js returns { columns: string[], values: any[][] } — this zips them into objects.
- */
-function queryAll<T extends Record<string, unknown>>(
-  db: Database,
-  sql: string,
-  params?: SqlValue[]
-): T[] {
-  const stmt = db.prepare(sql);
-  if (params) stmt.bind(params);
-
-  const rows: T[] = [];
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject() as T);
-  }
-  stmt.free();
-  return rows;
-}
-
-function queryOne<T extends Record<string, unknown>>(
-  db: Database,
-  sql: string,
-  params?: SqlValue[]
-): T | null {
-  const results = queryAll<T>(db, sql, params);
-  return results[0] ?? null;
-}
-
 export class PaprikaRepository {
-  private db: Database | null = null;
-  private dbPath: string;
+  private db: Database;
 
-  constructor(dbPath: string) {
-    this.dbPath = dbPath;
-  }
-
-  /** Initialize sql.js WASM and load the database file. Must be called before any queries. */
-  async init(): Promise<void> {
-    const SQL = await initSqlJs();
-    const fileBuffer = readFileSync(this.dbPath);
-    this.db = new SQL.Database(fileBuffer);
-  }
-
-  private getDb(): Database {
-    if (!this.db) {
-      throw new Error("Repository not initialized. Call init() first.");
+  constructor(dbPath: string, options?: { readonly?: boolean }) {
+    const isReadonly = options?.readonly ?? true;
+    this.db = new Database(dbPath, { readonly: isReadonly });
+    if (!isReadonly) {
+      this.db.exec("PRAGMA journal_mode = WAL");
     }
-    return this.db;
   }
 
   /**
@@ -83,23 +42,26 @@ export class PaprikaRepository {
    * Filters out trashed recipes.
    */
   listRecipes(): RecipeSummary[] {
-    const db = this.getDb();
-    const rows = queryAll<{
-      Z_PK: number;
-      ZUID: string;
-      ZNAME: string;
-      ZRATING: number | null;
-      ZTOTALTIME: string | null;
-      ZSERVINGS: string | null;
-      ZONFAVORITES: number;
-      ZSOURCE: string | null;
-    }>(
-      db,
-      `SELECT Z_PK, ZUID, ZNAME, ZRATING, ZTOTALTIME, ZSERVINGS, ZONFAVORITES, ZSOURCE
+    const rows = this.db
+      .query<
+        {
+          Z_PK: number;
+          ZUID: string;
+          ZNAME: string;
+          ZRATING: number | null;
+          ZTOTALTIME: string | null;
+          ZSERVINGS: string | null;
+          ZONFAVORITES: number;
+          ZSOURCE: string | null;
+        },
+        []
+      >(
+        `SELECT Z_PK, ZUID, ZNAME, ZRATING, ZTOTALTIME, ZSERVINGS, ZONFAVORITES, ZSOURCE
        FROM ZRECIPE
        WHERE ZINTRASH = 0
        ORDER BY ZNAME COLLATE NOCASE`
-    );
+      )
+      .all();
 
     return rows.map((row) => ({
       uid: row.ZUID,
@@ -117,38 +79,40 @@ export class PaprikaRepository {
    * Get a single recipe by UID with full detail (ingredients, directions, etc.).
    */
   getRecipe(uid: string): Recipe | null {
-    const db = this.getDb();
-    const row = queryOne<{
-      Z_PK: number;
-      ZUID: string;
-      ZNAME: string;
-      ZINGREDIENTS: string | null;
-      ZDIRECTIONS: string | null;
-      ZDESCRIPTIONTEXT: string | null;
-      ZNOTES: string | null;
-      ZNUTRITIONALINFO: string | null;
-      ZPREPTIME: string | null;
-      ZCOOKTIME: string | null;
-      ZTOTALTIME: string | null;
-      ZSERVINGS: string | null;
-      ZDIFFICULTY: string | null;
-      ZRATING: number | null;
-      ZSOURCE: string | null;
-      ZSOURCEURL: string | null;
-      ZIMAGEURL: string | null;
-      ZONFAVORITES: number;
-      ZISPINNED: number;
-      ZCREATED: number | null;
-    }>(
-      db,
-      `SELECT Z_PK, ZUID, ZNAME, ZINGREDIENTS, ZDIRECTIONS, ZDESCRIPTIONTEXT,
+    const row = this.db
+      .query<
+        {
+          Z_PK: number;
+          ZUID: string;
+          ZNAME: string;
+          ZINGREDIENTS: string | null;
+          ZDIRECTIONS: string | null;
+          ZDESCRIPTIONTEXT: string | null;
+          ZNOTES: string | null;
+          ZNUTRITIONALINFO: string | null;
+          ZPREPTIME: string | null;
+          ZCOOKTIME: string | null;
+          ZTOTALTIME: string | null;
+          ZSERVINGS: string | null;
+          ZDIFFICULTY: string | null;
+          ZRATING: number | null;
+          ZSOURCE: string | null;
+          ZSOURCEURL: string | null;
+          ZIMAGEURL: string | null;
+          ZONFAVORITES: number;
+          ZISPINNED: number;
+          ZCREATED: number | null;
+        },
+        [string]
+      >(
+        `SELECT Z_PK, ZUID, ZNAME, ZINGREDIENTS, ZDIRECTIONS, ZDESCRIPTIONTEXT,
               ZNOTES, ZNUTRITIONALINFO, ZPREPTIME, ZCOOKTIME, ZTOTALTIME,
               ZSERVINGS, ZDIFFICULTY, ZRATING, ZSOURCE, ZSOURCEURL,
               ZIMAGEURL, ZONFAVORITES, ZISPINNED, ZCREATED
        FROM ZRECIPE
-       WHERE ZUID = ? AND ZINTRASH = 0`,
-      [uid]
-    );
+       WHERE ZUID = ? AND ZINTRASH = 0`
+      )
+      .get(uid);
 
     if (!row) return null;
 
@@ -185,9 +149,8 @@ export class PaprikaRepository {
     category?: string;
     maxResults?: number;
   }): RecipeSummary[] {
-    const db = this.getDb();
     const conditions: string[] = ["r.ZINTRASH = 0"];
-    const params: SqlValue[] = [];
+    const params: (string | number)[] = [];
 
     if (opts.query) {
       conditions.push(
@@ -211,7 +174,13 @@ export class PaprikaRepository {
     const limit = opts.maxResults ?? 50;
     params.push(limit);
 
-    const rows = queryAll<{
+    const sql = `SELECT r.Z_PK, r.ZUID, r.ZNAME, r.ZRATING, r.ZTOTALTIME, r.ZSERVINGS, r.ZONFAVORITES, r.ZSOURCE
+       FROM ZRECIPE r
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY r.ZNAME COLLATE NOCASE
+       LIMIT ?`;
+
+    const rows = this.db.query(sql).all(...params) as {
       Z_PK: number;
       ZUID: string;
       ZNAME: string;
@@ -220,15 +189,7 @@ export class PaprikaRepository {
       ZSERVINGS: string | null;
       ZONFAVORITES: number;
       ZSOURCE: string | null;
-    }>(
-      db,
-      `SELECT r.Z_PK, r.ZUID, r.ZNAME, r.ZRATING, r.ZTOTALTIME, r.ZSERVINGS, r.ZONFAVORITES, r.ZSOURCE
-       FROM ZRECIPE r
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY r.ZNAME COLLATE NOCASE
-       LIMIT ?`,
-      params
-    );
+    }[];
 
     return rows.map((row) => ({
       uid: row.ZUID,
@@ -246,20 +207,23 @@ export class PaprikaRepository {
    * List all categories with their recipe counts.
    */
   listCategories(): Category[] {
-    const db = this.getDb();
-    const rows = queryAll<{
-      ZUID: string;
-      ZNAME: string;
-      recipe_count: number;
-    }>(
-      db,
-      `SELECT c.ZUID, c.ZNAME, COUNT(j.Z_12RECIPES) as recipe_count
+    const rows = this.db
+      .query<
+        {
+          ZUID: string;
+          ZNAME: string;
+          recipe_count: number;
+        },
+        []
+      >(
+        `SELECT c.ZUID, c.ZNAME, COUNT(r.Z_PK) as recipe_count
        FROM ZRECIPECATEGORY c
        LEFT JOIN Z_12CATEGORIES j ON j.Z_13CATEGORIES = c.Z_PK
        LEFT JOIN ZRECIPE r ON r.Z_PK = j.Z_12RECIPES AND r.ZINTRASH = 0
        GROUP BY c.Z_PK
        ORDER BY c.ZNAME COLLATE NOCASE`
-    );
+      )
+      .all();
 
     return rows.map((row) => ({
       uid: row.ZUID,
@@ -273,24 +237,20 @@ export class PaprikaRepository {
    * This encapsulates the Core Data join table convention.
    */
   private getCategoriesForRecipePk(pk: number): string[] {
-    const db = this.getDb();
-    const rows = queryAll<{ ZNAME: string }>(
-      db,
-      `SELECT c.ZNAME
+    const rows = this.db
+      .query<{ ZNAME: string }, [number]>(
+        `SELECT c.ZNAME
        FROM ZRECIPECATEGORY c
        JOIN Z_12CATEGORIES j ON j.Z_13CATEGORIES = c.Z_PK
        WHERE j.Z_12RECIPES = ?
-       ORDER BY c.ZNAME COLLATE NOCASE`,
-      [pk]
-    );
+       ORDER BY c.ZNAME COLLATE NOCASE`
+      )
+      .all(pk);
 
     return rows.map((r) => r.ZNAME);
   }
 
   close(): void {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
+    this.db.close();
   }
 }

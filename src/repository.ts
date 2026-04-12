@@ -26,6 +26,18 @@ function coreDataTimestampToISO(timestamp: number | null): string | null {
   return new Date(unixMs).toISOString();
 }
 
+/** Row shape returned by summary queries (listRecipes, searchRecipes). */
+interface RecipeSummaryRow {
+  Z_PK: number;
+  ZUID: string;
+  ZNAME: string;
+  ZRATING: number | null;
+  ZTOTALTIME: string | null;
+  ZSERVINGS: string | null;
+  ZONFAVORITES: number;
+  ZSOURCE: string | null;
+}
+
 export class PaprikaRepository {
   private db: Database;
 
@@ -43,19 +55,7 @@ export class PaprikaRepository {
    */
   listRecipes(): RecipeSummary[] {
     const rows = this.db
-      .query<
-        {
-          Z_PK: number;
-          ZUID: string;
-          ZNAME: string;
-          ZRATING: number | null;
-          ZTOTALTIME: string | null;
-          ZSERVINGS: string | null;
-          ZONFAVORITES: number;
-          ZSOURCE: string | null;
-        },
-        []
-      >(
+      .query<RecipeSummaryRow, []>(
         `SELECT Z_PK, ZUID, ZNAME, ZRATING, ZTOTALTIME, ZSERVINGS, ZONFAVORITES, ZSOURCE
        FROM ZRECIPE
        WHERE ZINTRASH = 0
@@ -180,16 +180,8 @@ export class PaprikaRepository {
        ORDER BY r.ZNAME COLLATE NOCASE
        LIMIT ?`;
 
-    const rows = this.db.query(sql).all(...params) as {
-      Z_PK: number;
-      ZUID: string;
-      ZNAME: string;
-      ZRATING: number | null;
-      ZTOTALTIME: string | null;
-      ZSERVINGS: string | null;
-      ZONFAVORITES: number;
-      ZSOURCE: string | null;
-    }[];
+    // Cast needed: dynamic SQL with variable param count can't use query<Row, Params>() generics
+    const rows = this.db.query(sql).all(...params) as RecipeSummaryRow[];
 
     return rows.map((row) => ({
       uid: row.ZUID,

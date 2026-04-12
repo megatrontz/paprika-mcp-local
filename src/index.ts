@@ -186,31 +186,27 @@ server.registerTool(
       "Search recipes by keyword (matches name, ingredients, and description) " +
       "and/or filter by category name. At least one of query or category must be provided. " +
       "Returns recipe summaries — use get_recipe for full details.",
-    inputSchema: z
-      .object({
-        query: z
-          .string()
-          .optional()
-          .describe(
-            "Search term to match against recipe name, ingredients, and description"
-          ),
-        category: z
-          .string()
-          .optional()
-          .describe(
-            "Exact category name to filter by (case-sensitive, e.g. 'Weeknight', 'Asian')"
-          ),
-        maxResults: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
-          .default(25)
-          .describe("Maximum results to return (1-100)"),
-      })
-      .refine((data) => data.query || data.category, {
-        message: "At least one of 'query' or 'category' must be provided",
-      }),
+    inputSchema: z.object({
+      query: z
+        .string()
+        .optional()
+        .describe(
+          "Search term to match against recipe name, ingredients, and description"
+        ),
+      category: z
+        .string()
+        .optional()
+        .describe(
+          "Exact category name to filter by (case-sensitive, e.g. 'Weeknight', 'Asian')"
+        ),
+      maxResults: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .default(25)
+        .describe("Maximum results to return (1-100)"),
+    }),
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -218,6 +214,18 @@ server.registerTool(
     },
   },
   async ({ query, category, maxResults }) => {
+    if (!query && !category) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "At least one of 'query' or 'category' must be provided",
+          },
+        ],
+        isError: true,
+      };
+    }
+
     const results = repo.searchRecipes({ query, category, maxResults });
 
     return {

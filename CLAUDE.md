@@ -2,14 +2,19 @@
 
 ## What This Is
 
-A read-only MCP server (TypeScript, stdio transport) that exposes Paprika Recipe Manager's local SQLite database to Claude Desktop. Architecture: `Claude Desktop --stdio--> this process --readonly--> Paprika.sqlite`.
+An MCP server (TypeScript, stdio transport) that exposes Paprika Recipe Manager's local SQLite database to Claude Desktop. Architecture: `Claude Desktop --stdio--> this process --readonly--> Paprika.sqlite`.
+
+Currently read-only. Future write path planned for category management via Claude/agents.
 
 ## Build & Run
 
 ```bash
-npm install          # sql.js is pure WASM — no native deps
-npm run build        # tsc -> dist/
-npm run dev          # tsx (no build step, for development)
+bun install          # install dependencies
+bun run start        # run the server (bun run src/index.ts)
+bun run dev          # dev mode with watch (bun --watch src/index.ts)
+bun run build        # tsc type-check (outputs to dist/, not needed for running)
+bun test             # run repository tests
+bun run create-fixture  # regenerate test SQLite fixture
 ```
 
 ## Project Structure
@@ -19,13 +24,19 @@ src/
   index.ts        # MCP server entry point — tool registrations, stdio transport, db path resolution
   repository.ts   # Data access layer (Repository pattern) — ALL SQL lives here
   types.ts        # Domain types (Recipe, RecipeSummary, Category)
+test/
+  repository.test.ts          # Repository tests (bun:test)
+  fixtures/
+    create-fixture.ts         # Generates test SQLite from real Paprika schema
+    test-paprika.sqlite       # Test fixture (committed)
 ```
 
 ## Key Architecture Decisions
 
 - **Repository pattern**: MCP tool handlers never touch SQLite directly. All schema knowledge is in `repository.ts`.
-- **sql.js** (not better-sqlite3): SQLite compiled to WASM. Zero native deps, no node-gyp. Tradeoff: loads entire DB into memory at startup (~3MB, fine for hundreds of recipes).
-- **Read-only**: Paprika owns writes. We open the DB read-only. `repo.init()` is async (WASM loading) and must complete before the server connects.
+- **bun:sqlite** (built-in): Native SQLite access via Bun runtime. Opens the database file directly in read-only mode — no WASM, no native compilation, no extra dependencies.
+- **Live reads**: The database file is opened directly (not loaded into memory). Queries reflect Paprika's latest state without restarting the server. WAL mode enables concurrent reads while Paprika writes.
+- **Currently read-only, future write path**: Paprika owns writes today. The `readonly` option on `PaprikaRepository` is configurable (defaults to `true`) to support future write operations for category management.
 
 ## Paprika's SQLite Schema (Core Data)
 
@@ -58,7 +69,7 @@ Default macOS path: `~/Library/Group Containers/72KVKW69K8.com.hindsightlabs.pap
 
 Override with `PAPRIKA_DB_PATH` env var.
 
-## Current Tool Inventory (MVP — read-only)
+## Current Tool Inventory
 
 | Tool | Input | Returns |
 |------|-------|---------|
@@ -69,14 +80,14 @@ Override with `PAPRIKA_DB_PATH` env var.
 
 ## What's Not Built Yet
 
+- Category management / write operations (planned — will use bun:sqlite write mode)
 - Grocery list / pantry item tools (tables exist: ZGROCERYITEM, ZPANTRYITEM)
 - Meal plan tools (tables exist: ZMEAL, ZMEALTYPE, ZMENU, ZMENUITEM)
-- Write operations (creating meal plans, adding grocery items back into Paprika)
 - Photo serving (photos exist on disk at `../Photos/<UUID>/`)
-- Live reload (currently loads DB into memory once at startup)
 
 ## Style
 
 - Zod schemas for all MCP tool inputs
-- Domain types in types.ts, raw row types declared inline in repository.ts
-- All tool annotations set `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`
+- Domain types in types.ts, raw row types in RecipeSummaryRow interface in repository.ts
+- All current tool annotations set `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`
+- Tests use bun:test with a SQLite fixture built from Paprika's real schema

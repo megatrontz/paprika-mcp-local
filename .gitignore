@@ -3,3 +3,7 @@ dist/
 *.sqlite
 !test/fixtures/test-paprika.sqlite
 .DS_Store
+
+# Local, user-specific config — never commit
+.mcp.json
+.claude/settings.local.json

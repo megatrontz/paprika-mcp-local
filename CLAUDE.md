@@ -73,7 +73,13 @@ Override with `PAPRIKA_DB_PATH` env var.
 
 All four tools declare an `outputSchema` and return `structuredContent` alongside the
 JSON text block. Structured content must be a JSON object, so list-shaped results are
-wrapped in an envelope.
+wrapped in an envelope. All four set `openWorldHint: false` — this server reads one
+local file.
+
+`search_recipes` semantics, which the tool descriptions must keep stating accurately:
+`query` is a literal substring match (LIKE metacharacters are escaped) and is *not*
+tokenized, so multi-word queries only match contiguous text. `category` is an exact,
+case-insensitive name match (`= ? COLLATE NOCASE`), not a pattern.
 
 | Tool | Input | Returns |
 |------|-------|---------|

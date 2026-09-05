@@ -165,6 +165,24 @@ describe("searchRecipes", () => {
     const results = repo.searchRecipes({ category: "Dinner", maxResults: 1 });
     expect(results).toHaveLength(1);
   });
+
+  test("matches category case-insensitively", () => {
+    const results = repo.searchRecipes({ category: "dinner" });
+    expect(results).toHaveLength(2);
+  });
+
+  test("treats category as an exact name, not a pattern", () => {
+    // '%' and a partial name would both match if category went through LIKE.
+    expect(repo.searchRecipes({ category: "%" })).toHaveLength(0);
+    expect(repo.searchRecipes({ category: "Din" })).toHaveLength(0);
+  });
+
+  test("treats LIKE metacharacters in query as literal text", () => {
+    expect(repo.searchRecipes({ query: "%" })).toHaveLength(0);
+    expect(repo.searchRecipes({ query: "_" })).toHaveLength(0);
+    // A single wildcard would otherwise match every recipe.
+    expect(repo.searchRecipes({ query: "Carbonara" })).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

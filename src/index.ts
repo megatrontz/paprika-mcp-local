@@ -12,7 +12,7 @@
  * The server exposes four tools:
  *   - list_recipes:    paginated summary of all recipes
  *   - get_recipe:      full detail for a single recipe by UID
- *   - search_recipes:  full-text search by name/ingredients/description, filterable by category
+ *   - search_recipes:  substring search by name/ingredients/description, filterable by category
  *   - list_categories: all categories with recipe counts
  *
  * Database path resolution (in order of precedence):
@@ -114,6 +114,8 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
+      // Reads one local SQLite file — no external domain.
+      openWorldHint: false,
     },
   },
   async ({ offset, limit }) => {
@@ -155,6 +157,8 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
+      // Reads one local SQLite file — no external domain.
+      openWorldHint: false,
     },
   },
   async ({ uid }) => {
@@ -187,19 +191,25 @@ server.registerTool(
     description:
       "Search recipes by keyword (matches name, ingredients, and description) " +
       "and/or filter by category name. At least one of query or category must be provided. " +
+      "The query is a literal substring match, not a tokenized full-text search: " +
+      "prefer a single distinctive word like 'carbonara' or 'pancetta' over a phrase " +
+      "like 'quick chicken pasta', which only matches if those words appear together. " +
+      "If a query returns nothing, retry with a shorter or different term. " +
       "Returns recipe summaries — use get_recipe for full details.",
     inputSchema: z.object({
       query: z
         .string()
         .optional()
         .describe(
-          "Search term to match against recipe name, ingredients, and description"
+          "Literal substring to match against recipe name, ingredients, and description. " +
+            "Not tokenized — one distinctive word works better than a phrase."
         ),
       category: z
         .string()
         .optional()
         .describe(
-          "Exact category name to filter by (case-sensitive, e.g. 'Weeknight', 'Asian')"
+          "Category name to filter by. Exact match, case-insensitive (e.g. 'Weeknight', " +
+            "'Asian') — not a prefix or wildcard. Use list_categories for valid names."
         ),
       maxResults: z
         .number()
@@ -217,6 +227,8 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
+      // Reads one local SQLite file — no external domain.
+      openWorldHint: false,
     },
   },
   async ({ query, category, maxResults }) => {
@@ -269,6 +281,8 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
+      // Reads one local SQLite file — no external domain.
+      openWorldHint: false,
     },
   },
   async () => {

@@ -26,6 +26,16 @@ function coreDataTimestampToISO(timestamp: number | null): string | null {
   return new Date(unixMs).toISOString();
 }
 
+/**
+ * Escape LIKE metacharacters so caller-supplied text matches literally.
+ *
+ * Without this, a search for "50%" or "chicken_soup" silently turns into a
+ * wildcard pattern. Pairs with `ESCAPE '\'` on the LIKE clause.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 /** Row shape returned by summary queries (listRecipes, searchRecipes). */
 interface RecipeSummaryRow {
   Z_PK: number;
@@ -143,6 +153,12 @@ export class PaprikaRepository {
   /**
    * Search recipes by name and/or ingredients using SQLite LIKE.
    * At least one of query or category must be provided.
+   *
+   * `query` is a literal substring match (metacharacters escaped) across name,
+   * ingredients, and description — it is not tokenized, so a multi-word query
+   * only matches when those words appear contiguously.
+   *
+   * `category` is an exact, case-insensitive name match — not a pattern.
    */
   searchRecipes(opts: {
     query?: string;
@@ -154,9 +170,11 @@ export class PaprikaRepository {
 
     if (opts.query) {
       conditions.push(
-        "(r.ZNAME LIKE ? OR r.ZINGREDIENTS LIKE ? OR r.ZDESCRIPTIONTEXT LIKE ?)"
+        `(r.ZNAME LIKE ? ESCAPE '\\'
+          OR r.ZINGREDIENTS LIKE ? ESCAPE '\\'
+          OR r.ZDESCRIPTIONTEXT LIKE ? ESCAPE '\\')`
       );
-      const pattern = `%${opts.query}%`;
+      const pattern = `%${escapeLikePattern(opts.query)}%`;
       params.push(pattern, pattern, pattern);
     }
 
@@ -165,7 +183,7 @@ export class PaprikaRepository {
         `r.Z_PK IN (
           SELECT j.Z_12RECIPES FROM Z_12CATEGORIES j
           JOIN ZRECIPECATEGORY c ON c.Z_PK = j.Z_13CATEGORIES
-          WHERE c.ZNAME LIKE ?
+          WHERE c.ZNAME = ? COLLATE NOCASE
         )`
       );
       params.push(opts.category);

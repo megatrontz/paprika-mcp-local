@@ -28,6 +28,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { PaprikaRepository } from "./repository.js";
+import { RecipeSchema, RecipeSummarySchema, CategorySchema } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Database path resolution
@@ -103,6 +104,12 @@ server.registerTool(
         .default(50)
         .describe("Maximum number of recipes to return (1-100)"),
     }),
+    outputSchema: z.object({
+      total: z.number().int().describe("Total number of non-trashed recipes"),
+      offset: z.number().int().describe("Offset this page was taken from"),
+      limit: z.number().int().describe("Maximum page size that was requested"),
+      recipes: z.array(RecipeSummarySchema).describe("This page of recipe summaries"),
+    }),
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -113,22 +120,17 @@ server.registerTool(
     const all = repo.listRecipes();
     const page = all.slice(offset, offset + limit);
 
+    const result = {
+      total: all.length,
+      offset,
+      limit,
+      recipes: page,
+    };
+
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              total: all.length,
-              offset,
-              limit,
-              recipes: page,
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      // The text block stays for clients that don't render structured output.
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
     };
   }
 );
@@ -148,6 +150,7 @@ server.registerTool(
     inputSchema: z.object({
       uid: z.string().describe("The unique identifier of the recipe"),
     }),
+    outputSchema: RecipeSchema,
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -158,6 +161,8 @@ server.registerTool(
     const recipe = repo.getRecipe(uid);
 
     if (!recipe) {
+      // Error results aren't validated against outputSchema, so they carry
+      // plain text only — no structuredContent.
       return {
         content: [{ type: "text" as const, text: `Recipe not found: ${uid}` }],
         isError: true,
@@ -165,12 +170,8 @@ server.registerTool(
     }
 
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(recipe, null, 2),
-        },
-      ],
+      content: [{ type: "text" as const, text: JSON.stringify(recipe, null, 2) }],
+      structuredContent: recipe,
     };
   }
 );
@@ -208,6 +209,10 @@ server.registerTool(
         .default(25)
         .describe("Maximum results to return (1-100)"),
     }),
+    outputSchema: z.object({
+      resultCount: z.number().int().describe("Number of recipes returned"),
+      recipes: z.array(RecipeSummarySchema).describe("Matching recipe summaries"),
+    }),
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -216,6 +221,8 @@ server.registerTool(
   },
   async ({ query, category, maxResults }) => {
     if (!query && !category) {
+      // Error results aren't validated against outputSchema, so they carry
+      // plain text only — no structuredContent.
       return {
         content: [
           {
@@ -228,21 +235,14 @@ server.registerTool(
     }
 
     const results = repo.searchRecipes({ query, category, maxResults });
+    const result = {
+      resultCount: results.length,
+      recipes: results,
+    };
 
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              resultCount: results.length,
-              recipes: results,
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
     };
   }
 );
@@ -260,6 +260,11 @@ server.registerTool(
       "Useful for understanding the recipe collection's organization " +
       "and for finding valid category names to use with search_recipes.",
     inputSchema: z.object({}),
+    // Structured content must be a JSON object, so the category list is wrapped
+    // in an envelope rather than returned as a bare array.
+    outputSchema: z.object({
+      categories: z.array(CategorySchema).describe("All categories, sorted by name"),
+    }),
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -267,15 +272,11 @@ server.registerTool(
     },
   },
   async () => {
-    const categories = repo.listCategories();
+    const result = { categories: repo.listCategories() };
 
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(categories, null, 2),
-        },
-      ],
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
     };
   }
 );

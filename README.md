@@ -92,6 +92,9 @@ If your Paprika database is in a non-standard location, set the `PAPRIKA_DB_PATH
 | `search_recipes` | Search by keyword and/or filter by category |
 | `list_categories` | All categories with recipe counts |
 
+Every tool declares an output schema and returns structured content alongside the
+JSON text block, so clients that support structured tool output get typed results.
+
 ## Development
 
 ```bash

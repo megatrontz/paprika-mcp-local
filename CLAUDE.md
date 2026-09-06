@@ -71,12 +71,22 @@ Override with `PAPRIKA_DB_PATH` env var.
 
 ## Current Tool Inventory
 
+All four tools declare an `outputSchema` and return `structuredContent` alongside the
+JSON text block. Structured content must be a JSON object, so list-shaped results are
+wrapped in an envelope. All four set `openWorldHint: false` — this server reads one
+local file.
+
+`search_recipes` semantics, which the tool descriptions must keep stating accurately:
+`query` is a literal substring match (LIKE metacharacters are escaped) and is *not*
+tokenized, so multi-word queries only match contiguous text. `category` is an exact,
+case-insensitive name match (`= ? COLLATE NOCASE`), not a pattern.
+
 | Tool | Input | Returns |
 |------|-------|---------|
-| `list_recipes` | offset, limit | Paginated RecipeSummary[] |
+| `list_recipes` | offset, limit | `{ total, offset, limit, recipes: RecipeSummary[] }` |
 | `get_recipe` | uid | Full Recipe with ingredients/directions |
-| `search_recipes` | query?, category?, maxResults | RecipeSummary[] matching keyword/category |
-| `list_categories` | (none) | Category[] with recipe counts |
+| `search_recipes` | query?, category?, maxResults | `{ resultCount, recipes: RecipeSummary[] }` |
+| `list_categories` | (none) | `{ categories: Category[] }` with recipe counts |
 
 ## What's Not Built Yet
 
@@ -87,7 +97,11 @@ Override with `PAPRIKA_DB_PATH` env var.
 
 ## Style
 
-- Zod schemas for all MCP tool inputs
-- Domain types in types.ts, raw row types in RecipeSummaryRow interface in repository.ts
+- Zod schemas for all MCP tool inputs and outputs
+- Domain types in types.ts are inferred from Zod schemas (`RecipeSchema`, `RecipeSummarySchema`,
+  `CategorySchema`) so tool `outputSchema`s can't drift from what the repository returns;
+  raw row types stay in repository.ts
+- Error returns (`isError: true`) carry plain text only — the SDK skips output validation for
+  them, and structured content on an error path would not be validated
 - All current tool annotations set `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`
 - Tests use bun:test with a SQLite fixture built from Paprika's real schema
